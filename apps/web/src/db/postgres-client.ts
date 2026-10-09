@@ -306,6 +306,21 @@ export class PostgresDatabaseClient {
     return res.rows;
   }
 
+  async getAllScans(): Promise<ScanRow[]> {
+    const res = await this.pool.query<ScanRow>("SELECT * FROM scans ORDER BY started_at DESC LIMIT 50;");
+    return res.rows;
+  }
+
+  async getAllFindings(): Promise<FindingRow[]> {
+    const res = await this.pool.query<FindingRow>("SELECT * FROM findings ORDER BY created_at DESC LIMIT 100;");
+    return res.rows;
+  }
+
+  async getAllRepositories(): Promise<RepositoryRow[]> {
+    const res = await this.pool.query<RepositoryRow>("SELECT * FROM repositories ORDER BY created_at DESC LIMIT 50;");
+    return res.rows;
+  }
+
   async getPreviousCompletedScan(repositoryId: string, currentScanId?: string): Promise<ScanRow | null> {
     const query = `
       SELECT * FROM scans

@@ -194,12 +194,16 @@ export async function detectSecrets(files: Map<string, string>): Promise<Finding
       let endLine = Math.max(1, lines.length);
 
       let hasSecrets = false;
+      let firstSecretFound = false;
       lines.forEach((line, index) => {
         if (line.includes("=") && !line.startsWith("#")) {
           const val = line.split("=")[1]?.trim() || "";
           if (val && !isLockfileOrPlaceholder(normalizedPath, val)) {
             hasSecrets = true;
-            if (startLine === 1) startLine = index + 1;
+            if (!firstSecretFound) {
+              startLine = index + 1;
+              firstSecretFound = true;
+            }
           }
         }
       });

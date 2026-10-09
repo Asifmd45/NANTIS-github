@@ -409,3 +409,86 @@ function hashCode(str: string): number {
   }
   return hash;
 }
+
+/**
+ * Dev-only sample demo scan handler.
+ * Scans the committed e2e fixture repo (fixtures/e2e-nextjs-supabase-stripe)
+ * which always produces 3 real security findings.
+ * Accessible at GET /api/dev/scan-sample-demo
+ */
+export async function handleSampleDemoScan(
+  req: RequestContext,
+  env: WebEnv
+): Promise<HttpResponse> {
+  const nodeEnv = process.env.NODE_ENV || env.NODE_ENV;
+  if (nodeEnv === "production") {
+    return {
+      status: 403,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ error: "Sample demo scan disabled in production mode" }),
+    };
+  }
+
+  const remoteIp = req.clientIp || "127.0.0.1";
+  if (!isLocalhostAddress(remoteIp)) {
+    return {
+      status: 403,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ error: "Sample demo scan is restricted to local connections (127.0.0.1)." }),
+    };
+  }
+
+  // Find the fixture directory relative to the project root
+  const fixtureRelative = "fixtures/e2e-nextjs-supabase-stripe";
+  const fixtureAbsolute = path.resolve(process.cwd(), fixtureRelative);
+
+  if (!fs.existsSync(fixtureAbsolute) || !fs.statSync(fixtureAbsolute).isDirectory()) {
+    return {
+      status: 404,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        error: `Sample demo fixture not found at ${fixtureAbsolute}. Run from the project root.`,
+      }),
+    };
+  }
+
+  // Ensure dev user and repo exist in DB
+  const devUser = await db.upsertUser({
+    github_user_id: 99999,
+    github_login: "devuser",
+    avatar_url: "https://github.com/images/error/octocat_happy.gif",
+  });
+
+  const demoRepo = await db.upsertRepository({
+    github_repo_id: 77777,
+    name: "e2e-nextjs-supabase-stripe",
+    full_name: "devuser/e2e-nextjs-supabase-stripe",
+    private: false,
+    installation_id: "1",
+    default_branch: "main",
+  });
+
+  await db.grantRepoAccess(devUser.id, demoRepo.id);
+
+  // Run static AST scan on the fixture directory
+  const { findings } = await runScan(fixtureAbsolute, { json: true });
+
+  const scan = await db.createScan({
+    repository_id: demoRepo.id,
+    commit_sha: "demo-fixture-scan",
+    branch: "main",
+    trigger_type: "manual",
+    status: "completed",
+  });
+
+  if (findings.length > 0) {
+    await db.saveScanFindings(scan.id, findings);
+  }
+
+  return {
+    status: 302,
+    headers: { Location: `/scans/${scan.id}` },
+    body: "",
+  };
+}
+

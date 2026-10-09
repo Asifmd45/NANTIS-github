@@ -99,3 +99,69 @@ export class MockLlmProvider implements LlmProvider {
     };
   }
 }
+
+/**
+ * Production Groq LLM Provider connecting to Groq Cloud API.
+ */
+export class GroqLlmProvider implements LlmProvider {
+  name = "groq";
+
+  constructor(
+    private apiKey?: string,
+    private defaultModel: string = (typeof process !== "undefined" && process.env?.GROQ_MODEL) || "qwen/qwen3.8-27b"
+  ) {
+    this.apiKey = apiKey || (typeof process !== "undefined" ? process.env?.GROQ_API_KEY : undefined);
+  }
+
+  async call(prompt: string, config?: LlmInvestigatorConfig): Promise<LlmResponse> {
+    const key = this.apiKey || (typeof process !== "undefined" ? process.env?.GROQ_API_KEY : undefined);
+    if (!key) {
+      throw new Error("GROQ_API_KEY is not configured.");
+    }
+
+    const model = config?.modelId || this.defaultModel;
+    const start = Date.now();
+
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${key}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.1,
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Groq API request failed (${response.status}): ${errText}`);
+    }
+
+    const data = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+      usage?: { total_tokens?: number };
+    };
+
+    const rawOutput = data.choices?.[0]?.message?.content || "{}";
+    const tokensUsed = data.usage?.total_tokens || 0;
+    const latencyMs = Date.now() - start;
+    const costUsd = (tokensUsed / 1_000_000) * 0.59;
+
+    return {
+      rawOutput,
+      tokensUsed,
+      costUsd,
+      latencyMs,
+    };
+  }
+}
+

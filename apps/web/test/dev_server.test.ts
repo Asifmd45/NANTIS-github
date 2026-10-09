@@ -2,7 +2,8 @@ import { describe, expect, it, afterEach } from "vitest";
 import path from "path";
 import os from "os";
 import fs from "fs";
-import { isLocalhostAddress, handleDevLogin, handleDevScan } from "../src/routes/dev-routes.js";
+import { isLocalhostAddress, handleDevLogin, handleDevScan, handleSampleDemoScan } from "../src/routes/dev-routes.js";
+import { db } from "../src/db/client.js";
 import { WebEnv } from "../src/lib/env.js";
 import { RequestContext } from "../src/routes/api-routes.js";
 
@@ -117,4 +118,71 @@ describe("Dev Server & Security Controls (apps/web/src/routes/dev-routes.ts)", (
       delete process.env.ALLOWED_SCAN_ROOT;
     }
   });
+
+  it("should REJECT sample demo scan when NODE_ENV is set to production", async () => {
+    process.env.NODE_ENV = "production";
+
+    const dummyReq: RequestContext = {
+      method: "GET",
+      path: "/api/dev/scan-sample-demo",
+      headers: {},
+      cookies: {},
+      clientIp: "127.0.0.1",
+    };
+
+    const res = await handleSampleDemoScan(dummyReq, { ...TEST_ENV, NODE_ENV: "production" });
+
+    expect(res.status).toBe(403);
+    expect(res.body).toContain("Sample demo scan disabled in production mode");
+  });
+
+  it("should REJECT sample demo scan when request originates from a non-localhost IP address", async () => {
+    process.env.NODE_ENV = "development";
+
+    const remoteReq: RequestContext = {
+      method: "GET",
+      path: "/api/dev/scan-sample-demo",
+      headers: {},
+      cookies: {},
+      clientIp: "192.168.1.100",
+    };
+
+    const res = await handleSampleDemoScan(remoteReq, TEST_ENV);
+
+    expect(res.status).toBe(403);
+    expect(res.body).toContain("restricted to local connections");
+  });
+
+  it("should scan sample fixture and persist exactly 3 real findings in development", async () => {
+    process.env.NODE_ENV = "development";
+
+    const req: RequestContext = {
+      method: "GET",
+      path: "/api/dev/scan-sample-demo",
+      headers: {},
+      cookies: {},
+      clientIp: "127.0.0.1",
+    };
+
+    const res = await handleSampleDemoScan(req, TEST_ENV);
+
+    expect(res.status).toBe(302);
+    expect(res.headers.Location).toMatch(/^\/scans\/[a-f0-9-]+$/);
+
+    const scanId = (res.headers.Location as string).replace("/scans/", "");
+    const scan = await db.getScanById(scanId);
+    expect(scan).toBeDefined();
+    expect(scan?.status).toBe("completed");
+
+    const findings = await db.getFindingsForScan(scanId);
+    expect(findings.length).toBe(3);
+
+    const ruleIds = findings.map((f) => f.ruleId).sort();
+    expect(ruleIds).toEqual([
+      "missing-lockfile",
+      "missing-rls-in-migration",
+      "stripe-webhook-no-signature",
+    ]);
+  }, 15000);
 });
+

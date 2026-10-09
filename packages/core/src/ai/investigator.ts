@@ -9,7 +9,7 @@ import {
 } from "./types.js";
 import { LlmInputGate } from "./input-gate.js";
 import { buildSecurityHunterPrompt } from "./prompt.js";
-import { LlmProvider, MockLlmProvider } from "./provider.js";
+import { LlmProvider, MockLlmProvider, GroqLlmProvider } from "./provider.js";
 import { indexRepository } from "../idor/indexer.js";
 import { SupabaseAnalyzer } from "../idor/supabase-analyzer.js";
 import { SecurityVerifiers } from "../idor/verifiers.js";
@@ -29,7 +29,18 @@ export class LlmSecurityHunter {
       maxFiles: config.maxFiles,
       maxTotalBytes: config.maxTotalBytes,
     });
-    this.provider = provider ?? new MockLlmProvider();
+    if (provider) {
+      this.provider = provider;
+    } else if (
+      typeof process !== "undefined" &&
+      process.env?.GROQ_API_KEY &&
+      process.env.GROQ_API_KEY.trim().length > 0 &&
+      process.env.NODE_ENV !== "test"
+    ) {
+      this.provider = new GroqLlmProvider();
+    } else {
+      this.provider = new MockLlmProvider();
+    }
   }
 
   /**

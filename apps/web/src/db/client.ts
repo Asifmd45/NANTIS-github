@@ -229,6 +229,18 @@ export class DatabaseClient {
     return Array.from(this.scans.values()).filter((s) => s.repository_id === repositoryId);
   }
 
+  async getAllScans(): Promise<ScanRow[]> {
+    return Array.from(this.scans.values());
+  }
+
+  async getAllFindings(): Promise<FindingRow[]> {
+    return Array.from(this.findings.values());
+  }
+
+  async getAllRepositories(): Promise<RepositoryRow[]> {
+    return Array.from(this.repositories.values());
+  }
+
   async getPreviousCompletedScan(repositoryId: string, currentScanId?: string): Promise<ScanRow | null> {
     const repoScans = Array.from(this.scans.values())
       .filter((s) => s.repository_id === repositoryId && s.id !== currentScanId && (s.status === "done" || s.status === "completed"))
@@ -719,14 +731,18 @@ export function createDatabaseClient(): IDatabaseClient {
   const dbUrl = process.env.DATABASE_URL;
   const nodeEnv = process.env.NODE_ENV;
 
-  if (dbUrl) {
+  if (nodeEnv === "production") {
+    if (!dbUrl) {
+      throw new Error(
+        "CRITICAL DATABASE CONFIGURATION ERROR: Production mode requires DATABASE_URL to be set for PostgreSQL persistence. Production will NOT fall back to volatile in-memory storage."
+      );
+    }
     return new PostgresDatabaseClient(dbUrl);
   }
 
-  if (nodeEnv === "production") {
-    throw new Error(
-      "CRITICAL DATABASE CONFIGURATION ERROR: Production mode requires DATABASE_URL to be set for PostgreSQL persistence. Production will NOT fall back to volatile in-memory storage."
-    );
+  // In development and test environments, use Postgres if explicitly enabled, otherwise in-memory storage
+  if (process.env.USE_POSTGRES === "true" && dbUrl) {
+    return new PostgresDatabaseClient(dbUrl);
   }
 
   return new DatabaseClient();

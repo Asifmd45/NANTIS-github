@@ -152,11 +152,23 @@ export async function runInContainerSandbox(
     const executable = sanitizedCommand[0];
     const args = sanitizedCommand.slice(1);
 
+    let isTimedOut = false;
+    let timeoutTimer: NodeJS.Timeout | null = null;
+
     const child = child_process.spawn(executable, args, {
       cwd: workspaceDir,
       env: sanitizedEnv,
       timeout: timeoutMs,
     });
+
+    if (timeoutMs && timeoutMs > 0) {
+      timeoutTimer = setTimeout(() => {
+        isTimedOut = true;
+        try {
+          child.kill("SIGKILL");
+        } catch {}
+      }, timeoutMs);
+    }
 
     let stdout = "";
     let stderr = "";
@@ -169,6 +181,7 @@ export async function runInContainerSandbox(
     });
 
     child.on("error", (err) => {
+      if (timeoutTimer) clearTimeout(timeoutTimer);
       resolve({
         exitCode: 1,
         stdout,
@@ -178,12 +191,16 @@ export async function runInContainerSandbox(
       });
     });
 
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+      const timedOut = isTimedOut || signal === "SIGTERM" || signal === "SIGKILL";
+      const exitCode = timedOut ? 124 : (code ?? (signal ? 1 : 0));
       resolve({
-        exitCode: code ?? 0,
+        exitCode,
         stdout,
-        stderr,
+        stderr: timedOut ? (stderr || "Process execution timed out") : stderr,
         contained: true,
+        violationReason: timedOut ? "Process execution timed out" : undefined,
       });
     });
   });

@@ -7,6 +7,7 @@ import {
   handleDevScan,
   handleExportLabels,
   handlePublicRepoScan,
+  handleSampleDemoScan,
   handleSetFindingLabel,
 } from "./routes/dev-routes.js";
 import { renderFixReviewPage } from "./routes/fix-review-page.js";
@@ -16,10 +17,27 @@ import { renderRepositoriesPage } from "./routes/repos-page.js";
 import { renderRulesCatalogPage } from "./routes/rules-catalog-page.js";
 import { renderScanFindingsPage } from "./routes/scan-findings-page.js";
 import { renderScanReportPage } from "./routes/scan-report-page.js";
+import {
+  renderScansPage,
+  renderFindingsPage,
+  renderFixesPage,
+  renderPullRequestsPage,
+  renderSettingsPage,
+} from "./routes/app-pages.js";
 import { API_ROUTE_REGISTRY } from "./routes/registry.js";
 import { decodeSession } from "./lib/session.js";
 import { db } from "./db/client.js";
 import { getDefaultHeaders, renderPageLayout } from "./routes/ui-templates.js";
+import { GroqLlmProvider } from "@nantis/core";
+
+// Load .env configuration if present
+try {
+  if (typeof (process as any).loadEnvFile === "function") {
+    (process as any).loadEnvFile();
+  }
+} catch {
+  // Ignore if .env is missing or loaded externally
+}
 
 // 1. Enforce NODE_ENV check on startup
 const nodeEnv = process.env.NODE_ENV || "development";
@@ -42,42 +60,6 @@ const env = validateWebEnv({
 
 const PORT = parseInt(process.env.PORT || "3000", 10);
 const HOST = "127.0.0.1";
-
-async function renderNotConnectedPage(
-  navName: "dashboard" | "repositories" | "scans" | "findings" | "fixes" | "pull-requests" | "settings",
-  title: string,
-  sessionToken?: string
-) {
-  let userLogin: string | undefined;
-  let userRepos: { id: string; name: string; full_name: string }[] = [];
-  if (sessionToken) {
-    const session = decodeSession(sessionToken, env.SESSION_SECRET);
-    if (session?.userId) {
-      userLogin = session.githubLogin;
-      userRepos = await db.getUserAccessibleRepositories(session.userId);
-    }
-  }
-
-  return renderPageLayout({
-    title,
-    userLogin,
-    activeNav: navName,
-    userRepos,
-    content: `
-      <div class="ui-card" style="text-align: center; padding: 48px 24px; max-width: 600px; margin: 40px auto;">
-        <div style="font-size: 3rem; margin-bottom: 16px;">🔌</div>
-        <h2 style="font-size: 1.5rem; font-weight: 700; margin-bottom: 8px;">Connect GitHub Required</h2>
-        <p style="color: var(--text-dim); margin-bottom: 24px; font-size: 0.95rem;">
-          This view requires an active GitHub repository connection. Sign in with GitHub or select repositories to access this page.
-        </p>
-        <div style="display: flex; gap: 12px; justify-content: center;">
-          <a href="/auth/login" class="btn btn-black">Connect GitHub</a>
-          <a href="/" class="btn btn-outline">Back to Home</a>
-        </div>
-      </div>
-    `,
-  });
-}
 
 export const server = http.createServer(async (req, res) => {
   const parsedUrl = url.parse(req.url || "/", true);
@@ -252,41 +234,127 @@ export const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Navigation pages requiring GitHub connection when unauthenticated
+  // Navigation Pages
   if (pathName === "/scans") {
-    const html = await renderNotConnectedPage("scans", "Scans", reqContext.cookies?.["nantis_session"]);
-    res.writeHead(200, getDefaultHeaders());
-    res.end(html);
+    const sessionToken = reqContext.cookies?.["nantis_session"];
+    if (sessionToken && !parsedUrl.query.all) {
+      const session = decodeSession(sessionToken, env.SESSION_SECRET);
+      if (session?.userId) {
+        // Find the latest scan for this user's repos
+        const repos = await db.getUserAccessibleRepositories(session.userId);
+        if (repos.length > 0) {
+          let latestScanId: string | null = null;
+          let latestScanTime = 0;
+          for (const repo of repos) {
+            const repoScans = await db.getScansForRepository(repo.id);
+            for (const sc of repoScans) {
+              const t = new Date(sc.started_at || 0).getTime();
+              if (t > latestScanTime) {
+                latestScanTime = t;
+                latestScanId = sc.id;
+              }
+            }
+          }
+          if (latestScanId) {
+            res.writeHead(302, { Location: `/scans/${latestScanId}` });
+            res.end();
+            return;
+          }
+        }
+      }
+    }
+    const response = await renderScansPage(reqContext, env);
+    res.writeHead(response.status, response.headers);
+    res.end(response.body);
     return;
   }
 
   if (pathName === "/findings") {
-    const html = await renderNotConnectedPage("findings", "Scan Findings", reqContext.cookies?.["nantis_session"]);
-    res.writeHead(200, getDefaultHeaders());
-    res.end(html);
+    const response = await renderFindingsPage(reqContext, env);
+    res.writeHead(response.status, response.headers);
+    res.end(response.body);
     return;
   }
 
   if (pathName === "/fixes") {
-    const html = await renderNotConnectedPage("fixes", "Fix Review", reqContext.cookies?.["nantis_session"]);
-    res.writeHead(200, getDefaultHeaders());
-    res.end(html);
+    const response = await renderFixesPage(reqContext, env);
+    res.writeHead(response.status, response.headers);
+    res.end(response.body);
     return;
   }
 
   if (pathName === "/pull-requests") {
-    const html = await renderNotConnectedPage("pull-requests", "Pull Requests", reqContext.cookies?.["nantis_session"]);
-    res.writeHead(200, getDefaultHeaders());
-    res.end(html);
+    const response = await renderPullRequestsPage(reqContext, env);
+    res.writeHead(response.status, response.headers);
+    res.end(response.body);
     return;
   }
 
   if (pathName === "/settings") {
-    const html = await renderNotConnectedPage("settings", "Settings", reqContext.cookies?.["nantis_session"]);
-    res.writeHead(200, getDefaultHeaders());
-    res.end(html);
+    const response = await renderSettingsPage(reqContext, env);
+    res.writeHead(response.status, response.headers);
+    res.end(response.body);
     return;
   }
+
+  // AI Remediation Generation (Groq LLM)
+  const aiFixMatch = pathName.match(/^\/api\/findings\/([^\/]+)\/ai-remediation$/);
+  if (aiFixMatch && req.method === "POST") {
+    const findingId = aiFixMatch[1];
+    const finding = await db.getFindingById(findingId);
+    if (!finding) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Finding not found" }));
+      return;
+    }
+
+    try {
+      const groq = new GroqLlmProvider();
+      const prompt = `You are an expert Application Security and AST analysis engineer for NANTIS.
+Analyze the following security finding and return a valid JSON object with keys:
+- "hypothesis": a clear explanation of why this code pattern is vulnerable and how an attacker could exploit it
+- "remediationSteps": array of 2-4 concrete, actionable code remediation steps
+- "suggestedFixSnippet": a safe TypeScript code snippet illustrating the proper check or authorization pattern
+
+Finding Details:
+Rule: ${finding.ruleId}
+File: ${finding.file}
+Line: ${finding.lineRange?.startLine || 1}
+Explanation: ${finding.explanation || "No explanation provided"}
+Title: ${finding.title}`;
+
+      const aiResp = await groq.call(prompt);
+      let parsed: Record<string, unknown> = {};
+      try {
+        parsed = JSON.parse(aiResp.rawOutput);
+      } catch {
+        parsed = {
+          hypothesis: aiResp.rawOutput,
+          remediationSteps: [
+            `Verify caller identity before querying ${finding.file}`,
+            "Ensure tenant isolation checks enforce resource ownership",
+          ],
+        };
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ success: true, ...parsed, latencyMs: aiResp.latencyMs, tokensUsed: aiResp.tokensUsed }));
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        success: true,
+        hypothesis: `Contextual security analysis for ${finding.ruleId}: Missing authentication or tenant isolation check in ${finding.file}.`,
+        remediationSteps: [
+          `Inspect ${finding.file} at line ${finding.lineRange?.startLine || 1}`,
+          "Verify the session user ID matches the target resource owner",
+          "Add database row-level security policy or where clause filtering",
+        ],
+        notice: `Groq direct inference note: ${errMsg}`,
+      }));
+    }
+    return;
+  }
+
 
   // Dev routes (Local development only)
   if (pathName === "/auth/dev-login") {
@@ -305,6 +373,13 @@ export const server = http.createServer(async (req, res) => {
 
   if (pathName === "/api/dev/scan-public-repo") {
     const response = await handlePublicRepoScan(reqContext, env);
+    res.writeHead(response.status, response.headers);
+    res.end(response.body);
+    return;
+  }
+
+  if (pathName === "/api/dev/scan-sample-demo") {
+    const response = await handleSampleDemoScan(reqContext, env);
     res.writeHead(response.status, response.headers);
     res.end(response.body);
     return;

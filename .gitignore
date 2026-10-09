@@ -8,6 +8,7 @@ scoreboard.json
 mutation-scoreboard.json
 .env
 .env.local
+!fixtures/**/.env*
 *.d.ts.map
 *.js.map
 test-results/

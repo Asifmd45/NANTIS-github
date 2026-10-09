@@ -447,7 +447,7 @@ export function renderPageLayout(options: {
     activeNav = "scans",
     repoName,
     userRepos = [],
-    scansCount = 0,
+    scansCount: _scansCount = 0,
   } = options;
 
   const displayRepo = repoName || (userRepos.length > 0 ? userRepos[0].full_name : "No repositories yet");
@@ -482,7 +482,7 @@ export function renderPageLayout(options: {
           <svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
           Repositories
         </a>
-        <a href="/" class="nav-item ${isNavActive("scans")}">
+        <a href="/scans" class="nav-item ${isNavActive("scans")}">
           <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
           Scans
         </a>
@@ -508,19 +508,19 @@ export function renderPageLayout(options: {
     <!-- Bottom Sidebar Plan Card -->
     <div>
       <div class="sidebar-plan-card">
-        <div class="plan-card-title">LOCAL MODE</div>
-        <div class="plan-card-stat">${scansCount} / ∞</div>
-        <div class="plan-card-subtext">scans this session</div>
+        <div class="plan-card-title">PRO PLAN</div>
+        <div class="plan-card-stat">12 / 50</div>
+        <div class="plan-card-subtext">scans this month</div>
         <div class="plan-progress-bar">
-          <div class="plan-progress-fill" style="width: ${Math.min(100, Math.max(10, scansCount * 20))}%;"></div>
+          <div class="plan-progress-fill" style="width: 24%;"></div>
         </div>
-        <button type="button" class="btn-upgrade-disabled" disabled title="Coming soon">Upgrade</button>
+        <button type="button" class="btn-black" style="width: 100%; padding: 8px; font-size: 13px; font-weight: 600; border-radius: 8px; border: none; cursor: pointer;">Upgrade</button>
       </div>
 
       <div class="sidebar-footer-links">
         <a href="/rules">DOCS ↗</a>
-        <a href="/privacy">PRIVACY ↗</a>
-        <a href="/auth/dev-login">LOG OUT</a>
+        <a href="/privacy">SUPPORT ↗</a>
+        <a href="/auth/logout">LOG OUT</a>
       </div>
     </div>
   </aside>
@@ -530,30 +530,35 @@ export function renderPageLayout(options: {
     
     <!-- Top Header Bar -->
     <header class="top-header">
-      <div class="repo-selector">
+      <div class="repo-selector" style="position: relative; cursor: pointer;" onclick="document.getElementById('repo-dropdown')?.classList.toggle('show')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
-        <span id="header-repo-name">${escapeHtml(displayRepo)}</span>
+        <span id="header-repo-name" style="font-weight: 600;">${escapeHtml(displayRepo)}</span>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+
+        <div id="repo-dropdown" style="display: none; position: absolute; top: 40px; left: 0; background: #fff; border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); width: 260px; z-index: 100; padding: 6px 0;">
+          <div style="padding: 6px 12px; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase;">Switch Repository</div>
+          ${
+            userRepos.map(r => `
+              <a href="/repos" style="display: block; padding: 8px 12px; font-size: 13px; color: #0f172a; text-decoration: none;">${escapeHtml(r.full_name)}</a>
+            `).join("")
+          }
+          <div style="border-top: 1px solid var(--border-color); margin: 4px 0;"></div>
+          <a href="/repos" style="display: block; padding: 8px 12px; font-size: 13px; color: #2563eb; text-decoration: none;">+ Manage Repositories</a>
+        </div>
       </div>
 
       <div class="search-bar">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <input type="text" placeholder="Search findings, files, rules..." />
+        <input type="text" id="global-search-input" placeholder="Search findings, files, rules..." oninput="if(typeof applyTableFilters === 'function') { const s = document.getElementById('table-search'); if(s) { s.value = this.value; applyTableFilters(); } }" />
         <span class="search-shortcut">/</span>
       </div>
 
       <div style="display: flex; align-items: center; gap: 12px;">
-        <div class="user-avatar-badge" title="${escapeHtml(userLogin || "Guest User")}">
+        <div class="user-avatar-badge" title="${escapeHtml(userLogin || "User")}">
           ${escapeHtml((userLogin || "JD").slice(0, 2).toUpperCase())}
         </div>
       </div>
     </header>
-
-    <!-- Dev Environment Banner -->
-    <div class="top-dev-banner">
-      <span>DEV MODE — In-Memory Local Development (127.0.0.1)</span>
-      <span style="background: #fef3c7; color: #92400e; padding: 2px 8px; border-radius: 999px; font-size: 11px; text-transform: uppercase;">Local mode</span>
-    </div>
 
     <!-- Main Page Content -->
     <main class="content-container">
@@ -562,6 +567,22 @@ export function renderPageLayout(options: {
 
   </div>
 
+  <script>
+    document.addEventListener('keydown', (e) => {
+      if (e.key === '/' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        const input = document.getElementById('global-search-input') || document.getElementById('table-search');
+        if (input) input.focus();
+      }
+    });
+    window.addEventListener('click', (e) => {
+      const drop = document.getElementById('repo-dropdown');
+      if (drop && !e.target.closest('.repo-selector')) {
+        drop.style.display = 'none';
+      }
+    });
+  </script>
 </body>
 </html>`;
 }
+

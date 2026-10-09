@@ -164,8 +164,37 @@ export async function renderRepositoriesPage(
           : ""
       }
 
+      <!-- Sample Demo Repository Card -->
+      <div class="ui-card" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding: 16px 20px; background: #ffffff; border-left: 4px solid #6366f1;">
+        <div>
+          <h3 style="font-size: 1.1rem; font-weight: 700;">
+            e2e-nextjs-supabase-stripe (Sample Vulnerable Fixture)
+            <span style="font-size: 0.75rem; font-weight: 600; padding: 2px 8px; border-radius: 9999px; background: #e0e7ff; color: #4338ca; margin-left: 8px;">
+              Local Demo
+            </span>
+          </h3>
+          <div style="margin-top: 4px; font-size: 0.8rem; color: #64748b;">
+            Comprehensive AST security test fixture with Next.js, Supabase IDOR, and Stripe webhook patterns.
+          </div>
+        </div>
+        <div>
+          <a href="/api/dev/scan-sample-demo" class="btn btn-black" style="padding: 8px 16px; font-size: 12px; font-weight: 600;">
+            Scan Demo Repo ➔
+          </a>
+        </div>
+      </div>
+
       ${repoListHtml}
+      <script>
+        document.addEventListener('click', function(e) {
+          var btn = e.target.closest('button[data-repo-id]');
+          if (btn && btn.closest('form')) {
+            btn.closest('form').submit();
+          }
+        });
+      </script>
     </div>
+
   `;
 
   return {

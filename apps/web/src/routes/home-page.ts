@@ -83,17 +83,52 @@ export async function renderHomePage(
         </p>
       </div>
 
-      <div class="ui-card" style="display: flex; justify-content: space-between; align-items: center; background: #ffffff;">
-        <div>
-          <h3 style="font-size: 16px; font-weight: 700; color: #0f172a; margin-bottom: 4px;">Connect Your GitHub Account</h3>
-          <p style="color: #64748b; font-size: 13px; margin: 0;">Sign in to choose repositories (public & private) for static AST analysis.</p>
-        </div>
-        <div>
-          <a href="/auth/login" class="btn btn-black" style="padding: 10px 20px; font-size: 13px; font-weight: 600;">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
-            Connect GitHub
-          </a>
-        </div>
+      <!-- Quick Action / Authentication Card -->
+      <div class="ui-card" style="background: #ffffff;">
+        ${
+          userLogin
+            ? `
+              <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;">
+                <div>
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #22c55e;"></span>
+                    <h3 style="font-size: 16px; font-weight: 700; color: #0f172a; margin: 0;">Signed in as <strong>@${escapeHtml(userLogin)}</strong></h3>
+                  </div>
+                  <p style="color: #64748b; font-size: 13px; margin: 4px 0 0 0;">Choose repositories to scan or launch a sample demo scan directly.</p>
+                </div>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                  <a href="/api/dev/scan-sample-demo" class="btn btn-black" style="padding: 9px 18px; font-size: 13px; font-weight: 600;">
+                    ⚡ Run Demo Scan (1-click)
+                  </a>
+                  <a href="/repos" class="btn btn-outline" style="padding: 9px 16px; font-size: 13px;">
+                    📁 Repositories
+                  </a>
+                  <a href="/findings" class="btn btn-outline" style="padding: 9px 16px; font-size: 13px;">
+                    Findings
+                  </a>
+                </div>
+              </div>
+            `
+            : `
+              <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+                <div>
+                  <h3 style="font-size: 16px; font-weight: 700; color: #0f172a; margin-bottom: 4px;">Get Started with NANTIS</h3>
+                  <p style="color: #64748b; font-size: 13px; margin: 0;">Sign in with GitHub or use local 1-click dev mode to test scans immediately.</p>
+                </div>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                  <a href="/auth/dev-login" class="btn btn-black" style="padding: 9px 18px; font-size: 13px; font-weight: 700;">
+                    ⚡ Quick Dev Login (1-click)
+                  </a>
+                  <a href="/api/dev/scan-sample-demo" class="btn btn-white-outline" style="padding: 9px 16px; font-size: 13px; font-weight: 600;">
+                    🚀 Run Demo Scan
+                  </a>
+                  <a href="/auth/login" class="btn btn-outline" style="padding: 9px 16px; font-size: 13px;">
+                    Connect GitHub ↗
+                  </a>
+                </div>
+              </div>
+            `
+        }
       </div>
 
       <div class="ui-card">
