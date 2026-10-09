@@ -80,7 +80,8 @@ export class ScanJobQueue {
     this.dbAdapter = dbAdapter;
     this.options = { ...DEFAULT_JOB_OPTIONS, ...options };
 
-    const connectionString = dbConfig || process.env.DATABASE_URL;
+    const usePostgres = process.env.USE_POSTGRES === "true";
+    const connectionString = dbConfig || (usePostgres ? process.env.DATABASE_URL : undefined);
     if (connectionString) {
       this.pgBossQueue = new PgBossScanJobQueue(this.dbAdapter, connectionString, this.options);
     }

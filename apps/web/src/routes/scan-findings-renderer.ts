@@ -833,9 +833,11 @@ export function renderScanFindingsContent(data: ScanFindingsRenderData): string 
               </div>
 
               <div id="fix-subpane-ai" class="fix-subtab-pane" style="display: none;">
-                <div style="background: #fdf4ff; border: 1px solid #f0abfc; border-radius: 8px; padding: 14px; font-size: 12px; color: #701a75; line-height: 1.6;">
-                  <strong>AI Remediation Hypothesis:</strong><br />
-                  The AST detector identified an unprotected handler. We recommend wrapping this route in your authentication middleware and extracting the authenticated user token prior to handling business logic.
+                <div style="background: #fdf4ff; border: 1px dashed #d946ef; border-radius: 8px; padding: 20px; text-align: center; color: #701a75;">
+                  <div style="font-size: 24px; margin-bottom: 8px;">✨</div>
+                  <div style="font-weight: 700; margin-bottom: 6px;">Live Groq Security Analysis</div>
+                  <p style="font-size: 12px; color: #86198f; margin-bottom: 12px;">Query Groq Cloud for deep contextual root cause hypothesis and step-by-step remediation instructions.</p>
+                  <button type="button" class="btn btn-black" style="font-size: 12px; padding: 6px 16px;" onclick="generateAiRemediation('\${item.id}')">✨ Generate with AI</button>
                 </div>
               </div>
             </div>
@@ -953,23 +955,36 @@ export function renderScanFindingsContent(data: ScanFindingsRenderData): string 
             body: JSON.stringify({ _csrf: "${escapeHtml(csrfToken)}" })
           });
           const data = await res.json();
+          if (!res.ok || data.success === false) {
+            if (aiPane) {
+              aiPane.innerHTML = '<div style="background: #fef2f2; border: 1px solid #fca5a5; border-radius: 8px; padding: 14px; font-size: 12px; color: #991b1b; line-height: 1.6;">' +
+                '<div style="font-weight: 800; font-size: 13px; margin-bottom: 6px;">❌ Groq AI Remediation Unavailable</div>' +
+                '<div style="margin-bottom: 8px;">' + escapeHtml(data.error || 'Failed to query Groq LLM provider.') + '</div>' +
+                '<div style="font-size: 11px; color: #7f1d1d; background: #fee2e2; padding: 6px 10px; border-radius: 4px;">Configuration required: Set a valid <code>GROQ_API_KEY</code> in your environment file.</div>' +
+                '</div>';
+            }
+            return;
+          }
           if (aiPane) {
-            const stepsHtml = data.remediationSteps && Array.isArray(data.remediationSteps)
-              ? '<div style="font-weight: 700; margin-bottom: 4px;">Recommended Remediation Steps:</div><ol style="margin-left: 20px; margin-bottom: 12px;">' + data.remediationSteps.map(s => '<li>' + s + '</li>').join('') + '</ol>'
+            const stepsHtml = data.remediationSteps && Array.isArray(data.remediationSteps) && data.remediationSteps.length > 0
+              ? '<div style="font-weight: 700; margin-bottom: 4px; color: #701a75;">Recommended Remediation Steps:</div><ol style="margin-left: 20px; margin-bottom: 12px; color: #475569;">' + data.remediationSteps.map(s => '<li>' + escapeHtml(s) + '</li>').join('') + '</ol>'
               : '';
             const snippetHtml = data.suggestedFixSnippet
-              ? '<div style="font-weight: 700; margin-bottom: 4px;">Suggested Code Snippet:</div><pre style="background: #ffffff; padding: 8px 12px; border-radius: 6px; font-size: 11px; overflow-x: auto; border: 1px solid #f5d0fe; color: #0f172a;">' + data.suggestedFixSnippet + '</pre>'
+              ? '<div style="font-weight: 700; margin-bottom: 4px; color: #701a75;">Suggested Code Snippet:</div><pre style="background: #ffffff; padding: 8px 12px; border-radius: 6px; font-size: 11px; overflow-x: auto; border: 1px solid #f5d0fe; color: #0f172a;">' + escapeHtml(data.suggestedFixSnippet) + '</pre>'
               : '';
             aiPane.innerHTML = '<div style="background: #fdf4ff; border: 1px solid #f0abfc; border-radius: 8px; padding: 16px; font-size: 13px; color: #701a75; line-height: 1.6;">' +
-              '<div style="font-weight: 800; font-size: 14px; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;"><span>✨</span> Groq AI Remediation Hypothesis</div>' +
-              '<p style="margin-bottom: 12px;">' + (data.hypothesis || 'Identified missing ownership filter in database query.') + '</p>' +
+              '<div style="font-weight: 800; font-size: 14px; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between;">' +
+                '<span style="display: flex; align-items: center; gap: 6px;"><span>✨</span> Groq AI Remediation Hypothesis</span>' +
+                '<span style="font-size: 11px; background: #fae8ff; color: #86198f; padding: 2px 8px; border-radius: 4px; font-weight: 600;">' + escapeHtml(data.model || 'llama-3.3-70b-versatile') + '</span>' +
+              '</div>' +
+              '<p style="margin-bottom: 12px; color: #334155;">' + escapeHtml(data.hypothesis || '') + '</p>' +
               stepsHtml + snippetHtml +
-              '<div style="margin-top: 10px; font-size: 11px; color: #a21caf;">Powered by Groq Cloud &amp; LLaMA-3.3-70B • Latency: ' + (data.latencyMs || 250) + 'ms</div>' +
+              '<div style="margin-top: 10px; font-size: 11px; color: #a21caf; border-top: 1px dashed #f0abfc; padding-top: 8px;">Powered by ' + escapeHtml(data.provider || 'Groq') + ' • Latency: ' + (data.latencyMs || 'N/A') + 'ms' + (data.tokensUsed ? ' • Tokens: ' + data.tokensUsed : '') + '</div>' +
               '</div>';
           }
         } catch (err) {
           if (aiPane) {
-            aiPane.innerHTML = '<div style="padding: 12px; color: #b91c1c;">AI remediation generation failed: ' + (err.message || String(err)) + '</div>';
+            aiPane.innerHTML = '<div style="background: #fef2f2; border: 1px solid #fca5a5; border-radius: 8px; padding: 14px; font-size: 12px; color: #991b1b;">❌ AI remediation generation failed: ' + escapeHtml(err.message || String(err)) + '</div>';
           }
         } finally {
           if (btn) btn.innerText = "✨ Generate with AI";
@@ -1140,6 +1155,25 @@ export function renderFindingDetailCardHtml(
               <span>⚙️ 2 CPU</span>
               <span>💾 4 GB RAM</span>
             </div>
+          </div>
+        </div>
+
+        <div id="fix-subpane-manual" class="fix-subtab-pane" style="display: none;">
+          <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; font-size: 12px; color: #334155; line-height: 1.6;">
+            <strong>Remediation Steps:</strong><br />
+            1. Inspect <code>${escapeHtml(finding.file)}</code> at line ${startLine}.<br />
+            2. Ensure authorization checks verify the current session user owns the requested entity.<br />
+            3. If using Supabase, ensure Row Level Security (RLS) is enabled and an explicit non-permissive policy is defined.<br />
+            4. For Stripe webhooks, verify that <code>stripe.webhooks.constructEvent</code> is called with the raw body and webhook secret.
+          </div>
+        </div>
+
+        <div id="fix-subpane-ai" class="fix-subtab-pane" style="display: none;">
+          <div style="background: #fdf4ff; border: 1px dashed #d946ef; border-radius: 8px; padding: 20px; text-align: center; color: #701a75;">
+            <div style="font-size: 24px; margin-bottom: 8px;">✨</div>
+            <div style="font-weight: 700; margin-bottom: 6px;">Live Groq Security Analysis</div>
+            <p style="font-size: 12px; color: #86198f; margin-bottom: 12px;">Query Groq Cloud for deep contextual root cause hypothesis and step-by-step remediation instructions.</p>
+            <button type="button" class="btn btn-black" style="font-size: 12px; padding: 6px 16px;" onclick="generateAiRemediation('${escapeHtml(fid)}')">✨ Generate with AI</button>
           </div>
         </div>
       </div>

@@ -190,7 +190,11 @@ export async function processScanJob(
     // CRITICAL: Ephemeral sandbox cleanup
     // Guarantee zero leftover files on disk for success, failure, or timeout
     if (fs.existsSync(jobTempDir)) {
-      fs.rmSync(jobTempDir, { recursive: true, force: true });
+      try {
+        fs.rmSync(jobTempDir, { recursive: true, force: true });
+      } catch {
+        // Suppress Windows EBUSY / EPERM file-lock errors during synchronous unlink
+      }
     }
 
     // Run janitor to clean any stale or orphaned scan directories

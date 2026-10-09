@@ -34,7 +34,7 @@ export async function assertRepoAccess(
     throw new NotFoundError("Not found");
   }
 
-  // 3. Confirm GitHub App installation access
+  // 3. Confirm repository access
   const hasAccess = await db.checkUserRepoAccess(userId, repoId);
   if (!hasAccess) {
     throw new NotFoundError("Not found");

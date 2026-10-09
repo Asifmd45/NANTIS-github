@@ -6,6 +6,7 @@ import {
   handleDevLogin,
   handleDevScan,
   handleExportLabels,
+  handleGitHubDiagnostic,
   handlePublicRepoScan,
   handleSampleDemoScan,
   handleSetFindingLabel,
@@ -53,6 +54,7 @@ const env = validateWebEnv({
   GITHUB_APP_SLUG: process.env.GITHUB_APP_SLUG || "nantis-app",
   GITHUB_APP_PRIVATE_KEY: process.env.GITHUB_APP_PRIVATE_KEY || "dev_private_key",
   GITHUB_WEBHOOK_SECRET: process.env.GITHUB_WEBHOOK_SECRET || "dev_webhook_secret",
+  GITHUB_TOKEN: process.env.GITHUB_TOKEN?.trim() || undefined,
   SESSION_SECRET: process.env.SESSION_SECRET || "dev_session_secret_32_characters_key_here",
   DATABASE_URL: process.env.DATABASE_URL || "postgresql://localhost:5432/dev",
   NODE_ENV: nodeEnv,
@@ -69,9 +71,9 @@ export const server = http.createServer(async (req, res) => {
   const cookieHeader = req.headers.cookie;
   if (cookieHeader) {
     cookieHeader.split(";").forEach((cookie) => {
-      const parts = cookie.split("=");
-      if (parts.length === 2) {
-        cookies[parts[0].trim()] = parts[1].trim();
+      const idx = cookie.indexOf("=");
+      if (idx !== -1) {
+        cookies[cookie.slice(0, idx).trim()] = cookie.slice(idx + 1).trim();
       }
     });
   }
@@ -337,19 +339,20 @@ Title: ${finding.title}`;
         };
       }
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ success: true, ...parsed, latencyMs: aiResp.latencyMs, tokensUsed: aiResp.tokensUsed }));
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({
         success: true,
-        hypothesis: `Contextual security analysis for ${finding.ruleId}: Missing authentication or tenant isolation check in ${finding.file}.`,
-        remediationSteps: [
-          `Inspect ${finding.file} at line ${finding.lineRange?.startLine || 1}`,
-          "Verify the session user ID matches the target resource owner",
-          "Add database row-level security policy or where clause filtering",
-        ],
-        notice: `Groq direct inference note: ${errMsg}`,
+        provider: "groq",
+        model: (typeof process !== "undefined" && process.env?.GROQ_MODEL) || "qwen/qwen3.8-27b",
+        ...parsed,
+        latencyMs: aiResp.latencyMs,
+        tokensUsed: aiResp.tokensUsed,
+      }));
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      res.writeHead(502, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        success: false,
+        error: errMsg,
       }));
     }
     return;
@@ -380,6 +383,13 @@ Title: ${finding.title}`;
 
   if (pathName === "/api/dev/scan-sample-demo") {
     const response = await handleSampleDemoScan(reqContext, env);
+    res.writeHead(response.status, response.headers);
+    res.end(response.body);
+    return;
+  }
+
+  if (pathName === "/api/dev/github-status" || pathName === "/api/github/status") {
+    const response = await handleGitHubDiagnostic(reqContext, env);
     res.writeHead(response.status, response.headers);
     res.end(response.body);
     return;

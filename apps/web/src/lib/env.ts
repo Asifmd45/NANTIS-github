@@ -5,6 +5,7 @@ export interface WebEnv {
   GITHUB_APP_SLUG?: string;
   GITHUB_APP_PRIVATE_KEY: string;
   GITHUB_WEBHOOK_SECRET: string;
+  GITHUB_TOKEN?: string;
   SESSION_SECRET: string;
   DATABASE_URL: string;
   NODE_ENV: "development" | "production" | "test";
@@ -52,6 +53,7 @@ export function validateWebEnv(env: Record<string, string | undefined> = process
     GITHUB_APP_SLUG: env.GITHUB_APP_SLUG!,
     GITHUB_APP_PRIVATE_KEY: env.GITHUB_APP_PRIVATE_KEY!,
     GITHUB_WEBHOOK_SECRET: env.GITHUB_WEBHOOK_SECRET!,
+    GITHUB_TOKEN: env.GITHUB_TOKEN?.trim() || undefined,
     SESSION_SECRET: env.SESSION_SECRET!,
     DATABASE_URL: env.DATABASE_URL || "postgresql://localhost:5432/nantis_db",
     NODE_ENV: (env.NODE_ENV as WebEnv["NODE_ENV"]) || "development",

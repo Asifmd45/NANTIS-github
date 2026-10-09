@@ -115,8 +115,9 @@ export async function renderRepositoriesPage(
     reposToList.length === 0
       ? `<div style="text-align: center; padding: 40px 20px; background: #f8fafc; border: 1px dashed var(--border-color); border-radius: 8px; color: var(--text-muted); font-size: 14px;">
           <p style="margin-bottom: 16px;">No repository access snapshot found or snapshot has expired.</p>
-          <div style="display: flex; gap: 12px; justify-content: center;">
-            <a href="${escapeHtml(chooseReposUrl)}" target="_blank" rel="noopener" class="btn btn-black">Choose repositories</a>
+          <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+            <a href="/" class="btn btn-black">Scan via URL (Home)</a>
+            <a href="${escapeHtml(chooseReposUrl)}" target="_blank" rel="noopener" class="btn btn-outline">Choose repositories</a>
             <a href="/auth/login?refresh=true" class="btn btn-outline">Refresh</a>
           </div>
         </div>`
@@ -131,6 +132,7 @@ export async function renderRepositoriesPage(
           </h1>
           <p style="color: var(--text-dim); font-size: 0.9rem; margin-bottom: 8px;">
             Signed in as <strong>${escapeHtml(session.githubLogin)}</strong>
+            ${env.GITHUB_TOKEN ? '<span style="background: #ecfdf5; color: #047857; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; margin-left: 8px;">🔑 GITHUB_TOKEN Active</span>' : ""}
           </p>
           <p style="font-size: 0.85rem; color: var(--text-muted); max-width: 600px; line-height: 1.5;">
             NANTIS gets read-only access to only the repositories you choose, and you can change this anytime on GitHub.

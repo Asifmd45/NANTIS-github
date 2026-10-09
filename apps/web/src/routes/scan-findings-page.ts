@@ -6,6 +6,7 @@ import { RequestContext } from "./api-routes.js";
 import { HttpResponse } from "./auth-login.js";
 import { renderScanFindingsContent, ScanFindingsRenderData } from "./scan-findings-renderer.js";
 import {
+  escapeHtml,
   getDefaultHeaders,
   getOrCreateCsrfToken,
   renderPageLayout,
@@ -91,6 +92,66 @@ export async function renderScanFindingsPage(
   }
 
   const csrfToken = getOrCreateCsrfToken(userId || "anonymous");
+
+  if (scan.status === "failed") {
+    const errorMsg = scan.error_message || "The repository could not be cloned or scanned.";
+    return {
+      status: 200,
+      headers: getDefaultHeaders(),
+      body: renderPageLayout({
+        title: `Scan Failed - ${repo.full_name}`,
+        userLogin: userId ? "user" : undefined,
+        csrfToken,
+        content: `
+          <div class="ui-card" style="max-width: 680px; margin: 40px auto; border-left: 4px solid #dc2626; padding: 32px 28px;">
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+              <span style="font-size: 32px;">❌</span>
+              <div>
+                <h2 style="font-size: 20px; font-weight: 800; color: #0f172a; margin: 0;">Scan Failed</h2>
+                <div style="font-size: 13px; color: #64748b; margin-top: 2px;">Repository: <code>${escapeHtml(repo.full_name)}</code></div>
+              </div>
+            </div>
+            <p style="color: #b91c1c; font-weight: 600; font-size: 14px; margin-bottom: 12px;">
+              ${escapeHtml(errorMsg)}
+            </p>
+            <p style="color: #64748b; font-size: 13px; margin-bottom: 24px; line-height: 1.5;">
+              Please check that the repository URL is public, contains source files, and the remote server is accessible.
+            </p>
+            <div style="display: flex; gap: 12px;">
+              <a href="/" class="btn btn-black">&larr; Back to Home</a>
+              <a href="/repos" class="btn btn-white-outline">Repositories</a>
+            </div>
+          </div>
+        `,
+      }),
+    };
+  }
+
+  if (scan.status === "queued" || scan.status === "cloning" || scan.status === "scanning") {
+    return {
+      status: 200,
+      headers: {
+        ...getDefaultHeaders(),
+        "Refresh": "2",
+      },
+      body: renderPageLayout({
+        title: `Scanning ${repo.full_name}...`,
+        content: `
+          <div class="ui-card" style="max-width: 600px; margin: 60px auto; text-align: center; padding: 48px 24px;">
+            <div style="font-size: 36px; margin-bottom: 16px;">⏳</div>
+            <h2 style="font-size: 22px; font-weight: 800; color: #0f172a; margin-bottom: 8px;">
+              Scan in Progress...
+            </h2>
+            <p style="color: #64748b; font-size: 14px; margin-bottom: 24px;">
+              Status: <strong style="text-transform: capitalize;">${escapeHtml(scan.status)}</strong> for <code>${escapeHtml(repo.full_name)}</code>. This page will automatically update once analysis finishes.
+            </p>
+            <div style="font-size: 12px; color: #94a3b8;">Auto-refreshing every 2 seconds...</div>
+          </div>
+        `,
+      }),
+    };
+  }
+
   const findings = await db.getFindingsForScan(scanId);
   const totalScansCount = (await db.getScansForRepository(scan.repository_id)).length;
   const prevScan = await db.getPreviousCompletedScan(scan.repository_id, scan.id);

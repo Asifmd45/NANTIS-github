@@ -84,13 +84,32 @@ export async function publishRemediationPR(options: PublishPrOptions): Promise<P
   const branchName = getDeterministicBranchName(scanId);
 
   try {
-    // 1. Check idempotency: See if PR already exists on GitHub
-    const token = await getInstallationAccessToken(
-      installationId,
-      env.GITHUB_APP_ID,
-      env.GITHUB_APP_PRIVATE_KEY,
-      fetchFn
-    );
+    // 1. Resolve token (PAT takes precedence or falls back to GitHub App IAT)
+    let token: string | undefined;
+    if (env.GITHUB_TOKEN && env.GITHUB_TOKEN.trim() !== "") {
+      token = env.GITHUB_TOKEN.trim();
+    } else if (env.GITHUB_APP_ID && env.GITHUB_APP_PRIVATE_KEY && installationId) {
+      try {
+        token = await getInstallationAccessToken(
+          installationId,
+          env.GITHUB_APP_ID,
+          env.GITHUB_APP_PRIVATE_KEY,
+          fetchFn
+        );
+      } catch (err: unknown) {
+        return {
+          success: false,
+          error: `GitHub App authentication failed: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+    }
+
+    if (!token) {
+      return {
+        success: false,
+        error: "No GitHub credentials (GITHUB_TOKEN or GitHub App) configured to publish PR",
+      };
+    }
 
     const checkExistingRes = await fetchFn(
       `https://api.github.com/repos/${owner}/${repo}/pulls?head=${owner}:${branchName}&state=open`,
@@ -162,11 +181,23 @@ export async function publishRemediationPR(options: PublishPrOptions): Promise<P
 
     const commitSha = execSync("git rev-parse HEAD", { cwd: repoPath, encoding: "utf-8" }).trim();
 
-    // 5. Authenticated Push to GitHub Remote
-    // Ephemeral push token configuration (NEVER stored permanently)
-    const remoteUrl = `https://x-access-token:${token}@github.com/${repoFullName}.git`;
+    // 5. Authenticated Push to GitHub Remote via Git extraHeader (NEVER in command-line arguments or URL)
+    const remoteUrl = `https://github.com/${repoFullName}.git`;
+    const pushEnv: Record<string, string | undefined> = {
+      ...process.env,
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_TERMINAL_PROMPT: "0",
+      GCM_INTERACTIVE: "never",
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "http.extraHeader",
+      GIT_CONFIG_VALUE_0: `Authorization: Bearer ${token}`,
+    };
     try {
-      execSync(`git push "${remoteUrl}" ${branchName} --force`, { cwd: repoPath, stdio: "ignore" });
+      execSync(`git push "${remoteUrl}" ${branchName} --force`, {
+        cwd: repoPath,
+        env: pushEnv,
+        stdio: "ignore",
+      });
     } catch {
       return { success: false, error: `Failed to push branch ${branchName} to remote repository` };
     }

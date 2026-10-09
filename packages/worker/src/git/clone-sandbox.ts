@@ -22,9 +22,27 @@ export function sanitizeGitErrorMessage(err: unknown, token?: string): string {
     msg = msg.replaceAll(token, "[REDACTED_TOKEN]");
   }
   msg = msg.replace(/https?:\/\/[^@\s]+@/g, "https://");
+  msg = msg.replace(/gh[pousr]_[A-Za-z0-9_]{30,}/g, "[REDACTED_TOKEN]");
 
   if (msg.includes("exceeds maximum")) {
     return msg;
+  }
+
+  const lower = msg.toLowerCase();
+  if (lower.includes("authentication failed") || lower.includes("bad credentials") || lower.includes("could not read username")) {
+    return "Authentication failed: GitHub token is invalid or expired. Check your GITHUB_TOKEN configuration.";
+  }
+
+  if (lower.includes("permission to") && lower.includes("denied")) {
+    return "Access denied: GITHUB_TOKEN lacks required permissions to access this repository.";
+  }
+
+  if (lower.includes("rate limit") || lower.includes("api rate limit")) {
+    return "GitHub rate limit exceeded. Please wait or configure a valid GITHUB_TOKEN for higher rate limits.";
+  }
+
+  if (lower.includes("repository not found") || (lower.includes("fatal:") && lower.includes("not found"))) {
+    return "Repository not found or access denied: Verify repository URL and ensure GITHUB_TOKEN has permission to access this repository.";
   }
 
   if (
@@ -33,8 +51,7 @@ export function sanitizeGitErrorMessage(err: unknown, token?: string): string {
     msg.includes("git clone failed") ||
     msg.includes("Git clone failed") ||
     msg.includes("timed out") ||
-    msg.includes("ETIMEDOUT") ||
-    msg.includes("REDACTED")
+    msg.includes("ETIMEDOUT")
   ) {
     return "Failed to clone repository source tree";
   }
@@ -58,41 +75,40 @@ export async function cloneRepositorySandboxed(options: CloneSandboxOptions): Pr
   // Keep plain repository URL (no credentials in URL, zero token in .git/config)
   const plainUrl = repoUrl;
 
-  // Construct secure git clone command flags
-  const gitArgs: string[] = [
-    "-c",
-    "protocol.file.allow=always",
-    "clone",
-    "--depth",
-    "1",
-    "--single-branch",
-    "--no-recurse-submodules",
-  ];
+  const buildArgs = (targetBranch?: string): string[] => {
+    const args: string[] = [
+      "-c",
+      "protocol.file.allow=always",
+      "-c",
+      "core.hooksPath=",
+      "-c",
+      "core.symlinks=false",
+      "-c",
+      "filter.lfs.smudge=",
+      "-c",
+      "filter.lfs.clean=",
+      "-c",
+      "filter.lfs.process=",
+      "clone",
+      "--depth",
+      "1",
+      "--single-branch",
+      "--no-recurse-submodules",
+    ];
 
-  if (branch) {
-    gitArgs.push("--branch", branch);
-  }
+    if (targetBranch) {
+      args.push("--branch", targetBranch);
+    }
 
-  gitArgs.push(
-    "-c",
-    "core.hooksPath=",
-    "-c",
-    "core.symlinks=false",
-    "-c",
-    "filter.lfs.smudge=",
-    "-c",
-    "filter.lfs.clean=",
-    "-c",
-    "filter.lfs.process=",
-    plainUrl,
-    targetDir
-  );
+    args.push(plainUrl, targetDir);
+    return args;
+  };
 
   const env: Record<string, string | undefined> = {
     ...process.env,
     GIT_CONFIG_NOSYSTEM: "1",
-    GIT_CONFIG_GLOBAL: "",
     GIT_TERMINAL_PROMPT: "0",
+    GCM_INTERACTIVE: "never",
   };
 
   // Pass token via GIT_CONFIG_COUNT / KEY / VALUE environment variables (zero process argv exposure)
@@ -104,29 +120,77 @@ export async function cloneRepositorySandboxed(options: CloneSandboxOptions): Pr
 
   const actualTimeout = timeoutMs || 30000;
 
-  try {
-    await new Promise<void>((resolve, reject) => {
+  const runGitClone = (args: string[], cloneEnv: Record<string, string | undefined>) => {
+    return new Promise<void>((resolve, reject) => {
       child_process.execFile(
         "git",
-        gitArgs,
+        args,
         {
-          env,
+          env: cloneEnv,
           timeout: actualTimeout,
           maxBuffer: 10 * 1024 * 1024,
         },
         (error, _stdout, stderr) => {
           if (error) {
-            const sanitizedErr = sanitizeGitErrorMessage(stderr || error.message, token);
-            reject(new Error(sanitizedErr));
+            const rawMsg = stderr || error.message;
+            reject(new Error(rawMsg));
           } else {
             resolve();
           }
         }
       );
     });
+  };
+
+  const attemptClone = async (targetBranch?: string, useToken = Boolean(token)) => {
+    const cloneEnv = { ...env };
+    if (!useToken) {
+      delete cloneEnv.GIT_CONFIG_COUNT;
+      delete cloneEnv.GIT_CONFIG_KEY_0;
+      delete cloneEnv.GIT_CONFIG_VALUE_0;
+    }
+    if (fs.existsSync(targetDir)) {
+      try {
+        fs.rmSync(targetDir, { recursive: true, force: true });
+      } catch {}
+    }
+    await runGitClone(buildArgs(targetBranch), cloneEnv);
+  };
+
+  try {
+    try {
+      await attemptClone(branch, Boolean(token));
+    } catch (initialErr: unknown) {
+      const errMsg = initialErr instanceof Error ? initialErr.message : String(initialErr);
+      const lower = errMsg.toLowerCase();
+
+      // Case 1: Remote branch not found -> retry default branch
+      if (branch && errMsg.includes("Remote branch") && errMsg.includes("not found")) {
+        try {
+          await attemptClone(undefined, Boolean(token));
+        } catch (branchErr: unknown) {
+          const branchErrMsg = branchErr instanceof Error ? branchErr.message : String(branchErr);
+          const bLower = branchErrMsg.toLowerCase();
+          if (token && (bLower.includes("authentication failed") || bLower.includes("could not read username") || bLower.includes("bad credentials"))) {
+            await attemptClone(undefined, false);
+          } else {
+            throw branchErr;
+          }
+        }
+      // Case 2: Auth failure on token (e.g. fine-grained PAT used on public repo outside token scope) -> fallback to anonymous
+      } else if (token && (lower.includes("authentication failed") || lower.includes("could not read username") || lower.includes("bad credentials"))) {
+        await attemptClone(branch, false);
+      } else {
+        throw initialErr;
+      }
+    }
   } catch (err) {
     if (fs.existsSync(targetDir)) {
-      fs.rmSync(targetDir, { recursive: true, force: true });
+      try {
+        fs.rmSync(targetDir, { recursive: true, force: true });
+      } catch {
+        // Ignore removal error on Windows busy handle
+      }
     }
     throw new Error(sanitizeGitErrorMessage(err, token));
   }

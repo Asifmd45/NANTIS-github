@@ -1,12 +1,13 @@
 import fs from "fs";
 import path from "path";
-import { runScan } from "@nantis/core";
+import { runAllDetectors, runScan, walkDirectory } from "@nantis/core";
 import { cloneRepositorySandboxed } from "@nantis/worker";
 import { db } from "../db/client.js";
 import { WebEnv } from "../lib/env.js";
 import { decodeSession, encodeSession } from "../lib/session.js";
 import { parseAndValidateGitHubUrl } from "../lib/url-validator.js";
-import { RequestContext, scanJobQueue } from "./api-routes.js";
+import { validatePatConnection } from "../lib/github-pat.js";
+import { RequestContext } from "./api-routes.js";
 import { HttpResponse } from "./auth-login.js";
 import {
   escapeHtml,
@@ -200,12 +201,27 @@ export async function handlePublicRepoScan(
   env: WebEnv
 ): Promise<HttpResponse> {
   const token = req.sessionToken || req.cookies?.["nantis_session"];
-  let userId = "dev-user-id";
-  if (token) {
-    const session = decodeSession(token, env.SESSION_SECRET);
-    if (session) {
-      userId = session.userId;
-    }
+  let session = token ? decodeSession(token, env.SESSION_SECRET) : null;
+  let userId = session?.userId;
+  let sessionCookie: string | undefined;
+
+  if (!userId) {
+    const devUser = await db.upsertUser({
+      github_user_id: 99999,
+      github_login: "devuser",
+      avatar_url: "https://github.com/images/error/octocat_happy.gif",
+    });
+    userId = devUser.id;
+    const sessionToken = encodeSession(
+      {
+        userId: devUser.id,
+        githubUserId: devUser.github_user_id,
+        githubLogin: devUser.github_login,
+        createdAt: Date.now(),
+      },
+      env.SESSION_SECRET
+    );
+    sessionCookie = `nantis_session=${sessionToken}; Path=/; HttpOnly; SameSite=Lax`;
   }
 
   // 1. CSRF Token Validation
@@ -223,7 +239,7 @@ export async function handlePublicRepoScan(
   // 2. Rate Limiting Check
   const now = Date.now();
   const lastScan = userLastScanTime.get(userId) || 0;
-  if (now - lastScan < 5000) {
+  if (now - lastScan < 2000) {
     return {
       status: 429,
       headers: getDefaultHeaders(),
@@ -260,56 +276,88 @@ export async function handlePublicRepoScan(
 
   const { repo: repoName, fullName, cloneUrl } = validated.data;
 
-  // 4. Create database records
-  const user = await db.upsertUser({
-    github_user_id: 99999,
-    github_login: "devuser",
-    avatar_url: "https://github.com/images/error/octocat_happy.gif",
-  });
-
+  // 4. Create database records and grant access to active userId
   const repoRecord = await db.upsertRepository({
     github_repo_id: Math.abs(hashCode(fullName)),
     name: repoName,
     full_name: fullName,
     private: false,
     installation_id: "1",
-    default_branch: "main",
+    default_branch: "HEAD",
   });
 
-  await db.grantRepoAccess(user.id, repoRecord.id);
+  await db.grantRepoAccess(userId, repoRecord.id);
 
-  // 5. Create scan record in database with queued status
+  // 5. Create scan record in database
   const scan = await db.createScan({
     repository_id: repoRecord.id,
     commit_sha: "head-shallow",
-    branch: "main",
+    branch: "HEAD",
     trigger_type: "manual",
-    status: "queued",
+    status: "cloning",
   });
 
-  // 6. Enqueue scan job into existing ScanJobQueue
-  await scanJobQueue.enqueueJob(
-    {
-      scanId: scan.id,
-      repoId: repoRecord.id,
-      installationId: 1,
-      requestedByUserId: userId,
-    },
-    {},
-    async (targetDir: string) => {
-      await cloneRepositorySandboxed({
-        repoUrl: cloneUrl,
-        branch: "main",
-        targetDir,
-        maxRepoSizeBytes: 50 * 1024 * 1024,
-        timeoutMs: 30000,
-      });
+  // Prepare ephemeral scan directory for this scan
+  const targetDir = path.resolve(process.cwd(), "temp/scans", scan.id);
+  if (fs.existsSync(targetDir)) {
+    try {
+      fs.rmSync(targetDir, { recursive: true, force: true });
+    } catch {}
+  }
+  fs.mkdirSync(targetDir, { recursive: true });
+
+  try {
+    // 6. Execute sandboxed clone (uses PAT if configured, otherwise anonymous)
+    const patToken = env.GITHUB_TOKEN || process.env.GITHUB_TOKEN;
+    await cloneRepositorySandboxed({
+      repoUrl: cloneUrl,
+      targetDir,
+      token: patToken,
+      maxRepoSizeBytes: 50 * 1024 * 1024,
+      timeoutMs: 45000,
+    });
+
+    // 7. Update status to scanning and walk files
+    await db.updateScanStatus(scan.id, "scanning");
+    const scannedFiles = walkDirectory(targetDir);
+    const filesMap = new Map<string, string>();
+    for (const f of scannedFiles) {
+      filesMap.set(f.relativePath, f.content);
     }
-  );
+
+    // 8. Run all detectors against actual repository files
+    const detectorResult = await runAllDetectors(filesMap, {
+      targetFolder: targetDir,
+      offlineMode: false,
+    });
+
+    if (detectorResult.diagnostics && detectorResult.diagnostics.length > 0) {
+      await db.saveScanDiagnostics(scan.id, detectorResult.diagnostics);
+    }
+    await db.saveScanFindings(scan.id, detectorResult.findings);
+    await db.updateScanStatus(scan.id, "completed");
+
+    await db.createAuditLog({
+      userId,
+      repoId: repoRecord.id,
+      action: "public_repo_scan_completed",
+      tokenId: `scan_${scan.id.slice(0, 8)}`,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: unknown) {
+    const rawErr = err instanceof Error ? err.message : String(err);
+    console.error(`[Public Repo Scan Error] ${fullName}:`, rawErr);
+    await db.updateScanStatus(scan.id, "failed", rawErr);
+  }
+
+  const headers: Record<string, string> = { Location: `/scans/${scan.id}` };
+  if (sessionCookie) {
+    headers["Set-Cookie"] = sessionCookie;
+  }
 
   return {
     status: 302,
-    headers: { Location: `/scans/${scan.id}` },
+    headers,
     body: "",
   };
 }
@@ -468,6 +516,26 @@ export async function handleSampleDemoScan(
     default_branch: "main",
   });
 
+  const token = req.sessionToken || req.cookies?.["nantis_session"];
+  let session = token ? decodeSession(token, env.SESSION_SECRET) : null;
+  let activeUserId = session?.userId;
+  let sessionCookie: string | undefined;
+
+  if (!activeUserId) {
+    activeUserId = devUser.id;
+    const sessionToken = encodeSession(
+      {
+        userId: devUser.id,
+        githubUserId: devUser.github_user_id,
+        githubLogin: devUser.github_login,
+        createdAt: Date.now(),
+      },
+      env.SESSION_SECRET
+    );
+    sessionCookie = `nantis_session=${sessionToken}; Path=/; HttpOnly; SameSite=Lax`;
+  }
+
+  await db.grantRepoAccess(activeUserId, demoRepo.id);
   await db.grantRepoAccess(devUser.id, demoRepo.id);
 
   // Run static AST scan on the fixture directory
@@ -485,10 +553,39 @@ export async function handleSampleDemoScan(
     await db.saveScanFindings(scan.id, findings);
   }
 
+  const headers: Record<string, string> = { Location: `/scans/${scan.id}` };
+  if (sessionCookie) {
+    headers["Set-Cookie"] = sessionCookie;
+  }
+
   return {
     status: 302,
-    headers: { Location: `/scans/${scan.id}` },
+    headers,
     body: "",
   };
 }
+
+/**
+ * Handle GET /api/dev/github-status or /api/github/status
+ * Returns diagnostic metadata about the configured GITHUB_TOKEN (user, rate limits, scopes)
+ * without ever exposing the raw token.
+ */
+export async function handleGitHubDiagnostic(
+  _req: RequestContext,
+  env: WebEnv
+): Promise<HttpResponse> {
+  const token = env.GITHUB_TOKEN || process.env.GITHUB_TOKEN;
+  const diagnostic = await validatePatConnection(token);
+
+  return {
+    status: 200,
+    headers: {
+      ...getDefaultHeaders(),
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+    },
+    body: JSON.stringify(diagnostic),
+  };
+}
+
 

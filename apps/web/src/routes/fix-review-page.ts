@@ -28,12 +28,18 @@ import {
  * Resolves the workspace folder path for a given repository and scan.
  */
 export function findWorkspaceForScan(repoName: string, scanId: string): string {
-  const candidates = [
-    path.resolve(process.cwd(), "temp/scans", scanId),
-    path.resolve(process.cwd(), "fixtures", repoName),
-    path.resolve(process.cwd(), "fixtures/e2e-nextjs-supabase-stripe"),
-    path.resolve(process.cwd(), repoName),
-  ];
+  const candidates: string[] = [];
+  if (scanId) {
+    candidates.push(path.resolve(process.cwd(), "temp/scans", scanId));
+  }
+  if (repoName) {
+    candidates.push(path.resolve(process.cwd(), "fixtures", repoName));
+    candidates.push(path.resolve(process.cwd(), repoName));
+  }
+  // Only use demo fixture if repoName actually matches it
+  if (repoName === "e2e-nextjs-supabase-stripe" || repoName.includes("e2e-nextjs-supabase-stripe")) {
+    candidates.push(path.resolve(process.cwd(), "fixtures/e2e-nextjs-supabase-stripe"));
+  }
   for (const c of candidates) {
     if (fs.existsSync(c) && fs.statSync(c).isDirectory()) {
       return c;
@@ -107,8 +113,18 @@ export async function renderFixReviewPage(
       status: 401,
       headers: getDefaultHeaders(),
       body: renderPageLayout({
-        title: "401 Unauthorized",
-        content: `<h1>401 Unauthorized</h1><p>Please sign in to view finding details.</p>`,
+        title: "401 Unauthorized - NANTIS",
+        content: `
+          <div class="ui-card" style="max-width: 540px; margin: 40px auto; text-align: center; padding: 40px 24px;">
+            <div style="font-size: 36px; margin-bottom: 12px;">🔒</div>
+            <h2 style="font-size: 22px; font-weight: 800; color: #0f172a; margin-bottom: 8px;">Authentication Required</h2>
+            <p style="color: #64748b; font-size: 14px; margin-bottom: 24px;">You must be signed in to review and apply AST remediation patches.</p>
+            <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+              <a href="/auth/login" class="btn btn-black">Connect with GitHub</a>
+              <a href="/auth/dev-login" class="btn btn-white-outline">⚡ Quick Dev Login</a>
+            </div>
+          </div>
+        `,
       }),
     };
   }
@@ -119,8 +135,18 @@ export async function renderFixReviewPage(
       status: 401,
       headers: getDefaultHeaders(),
       body: renderPageLayout({
-        title: "401 Unauthorized",
-        content: `<h1>401 Unauthorized</h1><p>Session invalid or expired.</p>`,
+        title: "401 Unauthorized - NANTIS",
+        content: `
+          <div class="ui-card" style="max-width: 540px; margin: 40px auto; text-align: center; padding: 40px 24px;">
+            <div style="font-size: 36px; margin-bottom: 12px;">⚠️</div>
+            <h2 style="font-size: 22px; font-weight: 800; color: #0f172a; margin-bottom: 8px;">Session Expired</h2>
+            <p style="color: #64748b; font-size: 14px; margin-bottom: 24px;">Your session is invalid or has expired. Please sign in again.</p>
+            <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+              <a href="/auth/login" class="btn btn-black">Connect with GitHub</a>
+              <a href="/auth/dev-login" class="btn btn-white-outline">⚡ Quick Dev Login</a>
+            </div>
+          </div>
+        `,
       }),
     };
   }
